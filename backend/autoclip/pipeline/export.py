@@ -56,6 +56,9 @@ class ExportRequest:
     style: CaptionStyle
     ratio: str = "9:16"
     burn_captions: bool = True
+    #: Drop the source audio. Footage clips are cut silent so music and
+    #: narration can be laid over them without the camera's own noise.
+    mute_audio: bool = False
 
     @property
     def duration_s(self) -> float:
@@ -175,6 +178,24 @@ def _zoom_filter(zoom: float, out_w: int, out_h: int) -> str:
     return f"zoompan=z='min(zoom+{zoom / 240:.6f},{end_zoom:.4f})':d=1:s={out_w}x{out_h}:fps=30"
 
 
+def audio_args(request: ExportRequest, settings: ExportSettings) -> list[str]:
+    """Audio mapping and encode arguments, or none at all for a muted clip."""
+    if request.mute_audio:
+        return ["-an"]
+    return [
+        "-map",
+        "0:a?",
+        "-af",
+        build_audio_filtergraph(settings),
+        "-c:a",
+        "aac",
+        "-b:a",
+        AUDIO_BITRATE,
+        "-ar",
+        str(AUDIO_SAMPLE_RATE),
+    ]
+
+
 def build_audio_filtergraph(settings: ExportSettings) -> str:
     return f"loudnorm=I={settings.loudness_lufs}:TP={LOUDNESS_TRUE_PEAK}:LRA={LOUDNESS_RANGE}"
 
@@ -278,19 +299,10 @@ def export_clip(
         filtergraph,
         "-map",
         "[vout]",
-        "-map",
-        "0:a?",
-        "-af",
-        build_audio_filtergraph(settings),
+        *audio_args(request, settings),
         *encoder_args(settings),
         "-pix_fmt",
         "yuv420p",
-        "-c:a",
-        "aac",
-        "-b:a",
-        AUDIO_BITRATE,
-        "-ar",
-        str(AUDIO_SAMPLE_RATE),
         "-movflags",
         "+faststart",
         str(request.destination),

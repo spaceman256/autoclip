@@ -129,11 +129,24 @@ export interface ProviderStatus {
   has_key: boolean
 }
 
+/** How clips are chosen: from speech, from the picture, or decided per video. */
+export type HighlightMode = 'auto' | 'speech' | 'visual'
+
 export interface Settings {
   active_provider: string
   providers: Record<string, { model: string; base_url: string | null }>
   whisper: { model: string; compute_type: string; language: string; diarization: boolean }
-  clips: { min_duration_s: number; max_duration_s: number; max_clips: number }
+  clips: {
+    min_duration_s: number
+    max_duration_s: number
+    max_clips: number
+    highlight_mode: HighlightMode
+    min_speech_wpm: number
+    visual_min_duration_s: number
+    visual_max_duration_s: number
+    visual_min_score: number
+    visual_mute_audio: boolean
+  }
   ingest: {
     ytdlp_format: string
     cookies_from_browser: string
@@ -172,6 +185,7 @@ export interface JobSettingsOverrides {
   min_duration_s?: number
   max_duration_s?: number
   max_clips?: number
+  highlight_mode?: HighlightMode
   caption_style?: string
   ratio?: string
 }

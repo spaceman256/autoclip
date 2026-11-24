@@ -66,6 +66,7 @@ class JobSettingsIn(BaseModel):
     min_duration_s: float | None = Field(default=None, gt=0)
     max_duration_s: float | None = Field(default=None, gt=0)
     max_clips: int | None = Field(default=None, ge=1, le=50)
+    highlight_mode: Literal["auto", "speech", "visual"] | None = None
     caption_style: str | None = None
     ratio: Literal["9:16", "1:1", "16:9"] | None = None
 

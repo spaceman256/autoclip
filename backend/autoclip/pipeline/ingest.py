@@ -279,14 +279,12 @@ def _probe_and_validate(path: Path) -> ffmpeg.MediaInfo:
     except ffmpeg.FFmpegError as exc:
         raise IngestError(f"{path.name} could not be read as media.", hint=str(exc)) from exc
 
-    if not info.has_audio:
+    if not info.has_audio and not info.has_video:
         raise IngestError(
-            f"{path.name} has no audio track.",
-            hint=(
-                "AutoClip finds clips by transcribing speech, so a file with no audio "
-                "has nothing to work from."
-            ),
+            f"{path.name} has no audio or video track.",
+            hint="The file may be corrupt or not a media file.",
         )
+    # Silent video is fine: it is clipped by picture (visual mode).
     if info.duration_s <= 0:
         raise IngestError(
             f"{path.name} reports zero duration.",

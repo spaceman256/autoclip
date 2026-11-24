@@ -8,6 +8,7 @@ import {
   type Job,
   type JobSettingsOverrides,
   type ProviderStatus,
+  type HighlightMode,
 } from '../api'
 import { ErrorNote } from '../components/ErrorNote'
 
@@ -226,6 +227,17 @@ function AdvancedOptions({
                   label: p.available ? p.name : `${p.name} — unavailable`,
                   disabled: !p.available,
                 })),
+              ]}
+            />
+            <Selector
+              label="Choose clips by"
+              value={overrides.highlight_mode ?? ''}
+              onChange={(v) => set('highlight_mode', (v || undefined) as HighlightMode | undefined)}
+              options={[
+                { value: '', label: 'Use default' },
+                { value: 'auto', label: 'Auto — speech if there is enough of it' },
+                { value: 'speech', label: 'Speech — what is said' },
+                { value: 'visual', label: 'Picture — footage with no talking' },
               ]}
             />
             <Selector

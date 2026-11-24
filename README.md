@@ -158,6 +158,25 @@ Everything the UI does is also on the CLI:
 
 Fonts are bundled under the SIL Open Font License, so nothing is fetched at runtime.
 
+### Footage with no talking
+
+Set **Choose clips by** to **Picture** (per job under Options, or by default in
+Settings → Footage). Clips are then chosen from the picture and scored out of
+100: Picture /25 (focus, light, steadiness), Subject /30 (a clear subject, not
+empty water), Usable /20 (long clean shots), Story /25 (the subject moving).
+75+ is a hero shot, 60-74 a cutaway, 45-59 filler; under 45 is rejected. The
+default **Auto** switches to picture mode for any video with under 40 spoken
+words a minute.
+
+To see the scores without making clips:
+
+```
+autoclip score path/to/clip.mp4 another.mp4 --csv scores.csv
+```
+
+The scores are a first sort, not a sign-off: species, logos, on-screen text and
+people still need a human eye.
+
 ## Troubleshooting
 
 Everything here is a real failure hit during development, not hypothetical.
