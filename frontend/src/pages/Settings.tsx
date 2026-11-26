@@ -1,6 +1,12 @@
 import { useEffect, useState } from 'react'
 
-import { api, type ProviderStatus, type Settings as SettingsData, type SystemStatus } from '../api'
+import {
+  api,
+  type HighlightMode,
+  type ProviderStatus,
+  type Settings as SettingsData,
+  type SystemStatus,
+} from '../api'
 import { ErrorNote } from '../components/ErrorNote'
 
 const SECRET_LABELS: Record<string, string> = {
@@ -204,6 +210,62 @@ export function Settings() {
             onCommit={(value) => patch({ clips: { ...settings.clips, max_clips: value } })}
           />
         </div>
+      </Section>
+
+      <Section
+        title="Footage"
+        note="For video with little or no talking. Clips are scored out of 100 on picture, subject, usable shots and story."
+      >
+        <div className="grid gap-5 sm:grid-cols-3">
+          <Select
+            label="Choose clips by"
+            value={settings.clips.highlight_mode}
+            onChange={(value) =>
+              patch({ clips: { ...settings.clips, highlight_mode: value as HighlightMode } })
+            }
+            options={['auto', 'speech', 'visual']}
+            labels={{
+              auto: 'Auto — speech if there is enough',
+              speech: 'Speech — what is said',
+              visual: 'Picture — footage',
+            }}
+          />
+          <NumberField
+            label="Reject below (/100)"
+            value={settings.clips.visual_min_score}
+            onCommit={(value) => patch({ clips: { ...settings.clips, visual_min_score: value } })}
+          />
+          <NumberField
+            label="Auto: speech above (words/min)"
+            value={settings.clips.min_speech_wpm}
+            onCommit={(value) => patch({ clips: { ...settings.clips, min_speech_wpm: value } })}
+          />
+          <NumberField
+            label="Footage min length (s)"
+            value={settings.clips.visual_min_duration_s}
+            onCommit={(value) =>
+              patch({ clips: { ...settings.clips, visual_min_duration_s: value } })
+            }
+          />
+          <NumberField
+            label="Footage max length (s)"
+            value={settings.clips.visual_max_duration_s}
+            onCommit={(value) =>
+              patch({ clips: { ...settings.clips, visual_max_duration_s: value } })
+            }
+          />
+        </div>
+        <label className="mt-5 flex items-start gap-3 text-sm text-ink-200">
+          <input
+            type="checkbox"
+            checked={settings.clips.visual_mute_audio}
+            onChange={(e) =>
+              patch({ clips: { ...settings.clips, visual_mute_audio: e.target.checked } })
+            }
+            className="mt-0.5 size-4 accent-sodium-500"
+          />
+          <span>Mute the footage&apos;s own sound, ready for music and narration</span>
+        </label>
       </Section>
 
       <Section title="Ingest">

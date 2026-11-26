@@ -11,6 +11,18 @@ being validated against a fixed golden video set — see
 
 ### Added
 
+- **Picture mode for footage with no talking.** Wildlife, underwater, drone and
+  B-roll footage is clipped from what the camera sees instead of what is said:
+  every sampled frame is measured for focus, light, camera shake, subject detail
+  and subject movement (with the camera's own movement taken out), and windows
+  are scored out of 100 — Picture 25, Subject 30, Usable 20 (long clean shots
+  beat 2-3 s fragments), Story 25 — and banded hero / cutaway / filler / reject.
+  No transcript or LLM is needed. `auto` mode switches per video by words per
+  minute; silent files (no audio track) are now accepted and always go this way.
+  The 9:16 crop holds on the subject per shot instead of centre-cropping, and
+  footage clips are exported muted by default, ready for music and narration.
+  `autoclip score FILE...` prints the scores without clipping, to check them
+  against your own.
 - **Pipeline** — ingest (YouTube via yt-dlp, or file upload), audio preparation,
   transcription with word-level timings, LLM highlight detection, speaker-tracked
   reframing, ASS caption generation, and export at 9:16 / 1:1 / 16:9.

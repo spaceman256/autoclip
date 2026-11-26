@@ -78,6 +78,10 @@ async def put_settings(payload: SettingsIn) -> SettingsOut:
         raise HTTPException(
             status_code=400, detail="Minimum clip length must be below the maximum."
         )
+    if settings.clips.visual_min_duration_s >= settings.clips.visual_max_duration_s:
+        raise HTTPException(
+            status_code=400, detail="Minimum footage clip length must be below the maximum."
+        )
 
     config.save(settings)
     return _settings_out(settings)

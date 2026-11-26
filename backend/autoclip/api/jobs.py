@@ -38,6 +38,8 @@ def _apply_overrides(settings, overrides: JobSettingsIn):
         merged.clips.max_duration_s = overrides.max_duration_s
     if overrides.max_clips is not None:
         merged.clips.max_clips = overrides.max_clips
+    if overrides.highlight_mode is not None:
+        merged.clips.highlight_mode = overrides.highlight_mode
     if overrides.caption_style:
         merged.export.caption_style = overrides.caption_style
     if overrides.ratio:

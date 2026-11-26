@@ -678,6 +678,89 @@ def serve(
 
 
 @app.command()
+def score(
+    files: list[Path] = typer.Argument(..., help="Footage files to score.", exists=True),
+    clips: int = typer.Option(3, "--clips", "-n", help="Best clips to list per file."),
+    min_length: float = typer.Option(8.0, "--min", help="Shortest clip, seconds."),
+    max_length: float = typer.Option(30.0, "--max", help="Longest clip, seconds."),
+    csv_out: Path | None = typer.Option(None, "--csv", help="Also write results to a CSV."),
+) -> None:
+    """Score footage on the picture rubric without making clips.
+
+    Prints each file's best stretches out of 100 (Picture, Subject, Usable,
+    Story), so the automatic scores can be checked against your own.
+    """
+    import csv
+
+    from .pipeline import visual
+    from .pipeline.ffmpeg import probe
+    from .pipeline.reframe.scenes import detect_shots
+
+    rows: list[dict[str, object]] = []
+    for path in files:
+        try:
+            duration = probe(path).duration_s
+            samples = visual.sample_video(path, duration_s=duration)
+            shots = [(s.start_s, s.end_s) for s in detect_shots(path, start_s=0.0, end_s=duration)]
+            windows = visual.find_windows(
+                visual.score_samples(samples),
+                duration_s=duration,
+                config=visual.VisualConfig(min_length, max_length, clips, 0.0),
+                shots=shots,
+            )
+        except Exception as exc:  # one bad file shouldn't stop the batch
+            console.print(f"[red]{path.name}[/red]: {exc}")
+            continue
+
+        table = Table(title=f"{path.name}  ({_format_duration(duration)}, {len(shots)} shots)")
+        for column in ("Time", "Score", "Band", "Picture", "Subject", "Usable", "Story", "Flags"):
+            table.add_column(column)
+        for w in windows:
+            flags = ", ".join(
+                f
+                for f, on in (
+                    ("shaky", w.shaky),
+                    ("empty water", w.empty_water),
+                    ("fragments", w.usable < 8),
+                )
+                if on
+            )
+            span = f"{_format_duration(w.start_s)}-{_format_duration(w.end_s)}"
+            table.add_row(
+                span,
+                f"{w.score:.0f}",
+                w.band,
+                f"{w.picture:.0f}/25",
+                f"{w.subject:.0f}/30",
+                f"{w.usable:.0f}/20",
+                f"{w.story:.0f}/25",
+                flags,
+            )
+            rows.append(
+                {
+                    "file": str(path),
+                    "start_s": w.start_s,
+                    "end_s": w.end_s,
+                    "score": round(w.score, 1),
+                    "band": w.band,
+                    "picture": round(w.picture, 1),
+                    "subject": round(w.subject, 1),
+                    "usable": round(w.usable, 1),
+                    "story": round(w.story, 1),
+                    "flags": flags,
+                }
+            )
+        console.print(table)
+
+    if csv_out and rows:
+        with csv_out.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
+            writer.writeheader()
+            writer.writerows(rows)
+        console.print(f"Wrote {len(rows)} rows to {csv_out}")
+
+
+@app.command()
 def styles() -> None:
     """List the available caption styles."""
     from .pipeline.captions import PRESETS

@@ -65,10 +65,31 @@ class WhisperSettings(BaseModel):
     diarization: bool = False
 
 
+HighlightMode = Literal["auto", "speech", "visual"]
+
+
 class ClipSettings(BaseModel):
     min_duration_s: float = 20.0
     max_duration_s: float = 90.0
     max_clips: int = 10
+    #: How clips are chosen.
+    #: ``speech`` — from what is said, by the language model (the original mode).
+    #: ``visual`` — from what the camera sees; no transcript or LLM needed.
+    #: ``auto``   — speech when there is enough of it, visual otherwise.
+    highlight_mode: HighlightMode = "auto"
+    #: In auto mode, a video with fewer spoken words per minute than this is
+    #: treated as footage and clipped visually. Narration runs at 120-160 wpm;
+    #: Whisper's hallucinated "thank you"s on silent footage stay well under 20.
+    min_speech_wpm: float = 40.0
+    #: Clip lengths for visual mode. Footage clips work shorter than speech
+    #: clips, which need room for a complete thought.
+    visual_min_duration_s: float = 8.0
+    visual_max_duration_s: float = 30.0
+    #: Visual clips scoring below this (out of 100) are rejected, not exported.
+    #: Bands: 75+ hero, 60-74 cutaway, 45-59 filler, under 45 reject.
+    visual_min_score: float = 45.0
+    #: Cut footage clips silent; music and narration go on afterwards.
+    visual_mute_audio: bool = True
 
 
 class IngestSettings(BaseModel):

@@ -25,7 +25,7 @@ from ..db import store
 from ..db.models import Clip, Export, Job, Source, new_id, utcnow
 from ..db.models import Transcript as TranscriptRow
 from ..providers import build_provider, detection_config
-from . import Stage, captions, export, ffmpeg, highlights, prepare, transcribe
+from . import Stage, captions, export, ffmpeg, highlights, prepare, transcribe, visual
 from .prepare import Silence
 from .reframe import ReframeConfig, build_crop_path
 from .reframe.croppath import CropPath
@@ -93,6 +93,20 @@ class JobWorkspace:
     def thumbnails(self) -> Path:
         return self.root / "thumbnails"
 
+    @property
+    def highlight_mode(self) -> Path:
+        """The speech-or-visual decision, saved so a retry makes the same one."""
+        return self.root / "highlight_mode.json"
+
+    @property
+    def visual_samples(self) -> Path:
+        return self.root / "visual_samples.json"
+
+    @property
+    def speech_transcript(self) -> Path:
+        """Where Whisper's output is kept when a job switches to visual mode."""
+        return self.root / "transcript.speech.json"
+
     def crop_path(self, clip_id: str) -> Path:
         return self.root / "crops" / f"{clip_id}.json"
 
@@ -120,6 +134,8 @@ class PipelineRunner:
         self._is_cancelled = is_cancelled or (lambda: False)
         self.workspace = JobWorkspace(job.id)
         self._completed_weight = 0.0
+        #: "speech" or "visual"; settled by _resolve_highlight_mode.
+        self._mode = "speech"
 
     # -- progress ----------------------------------------------------------
 
@@ -175,7 +191,8 @@ class PipelineRunner:
         try:
             audio = self._stage_prepare()
             transcript = self._stage_transcribe(audio)
-            silences = self._load_or_detect_silences(audio)
+            transcript = self._resolve_highlight_mode(transcript)
+            silences = [] if self.visual_mode else self._load_or_detect_silences(audio)
             clips = await self._stage_highlights(transcript, silences)
             crop_paths = self._stage_reframe(clips, transcript)
             self._stage_captions(clips, transcript)
@@ -198,7 +215,10 @@ class PipelineRunner:
         self._check_cancelled()
         source_path = Path(self.source.path)
 
-        if self.workspace.audio.exists() and self.workspace.audio.stat().st_size > 0:
+        if not self.source.has_audio:
+            # Silent footage: nothing to extract; it will be clipped by picture.
+            log.info("Source for job %s has no audio track.", self.job.id)
+        elif self.workspace.audio.exists() and self.workspace.audio.stat().st_size > 0:
             log.info("Reusing existing audio for job %s.", self.job.id)
         else:
             self._emit(stage, 0.0, "Extracting audio")
@@ -225,6 +245,14 @@ class PipelineRunner:
             self._finish_stage(stage)
             return transcript
 
+        visual_only = self.settings.clips.highlight_mode == "visual" or not self.source.has_audio
+        if visual_only and self.source.has_video:
+            # Visual mode never reads the words, so skip Whisper entirely.
+            transcript = Transcript(model="none (visual mode)")
+            self._save_transcript(transcript)
+            self._finish_stage(stage)
+            return transcript
+
         self._emit(stage, 0.0, "Transcribing")
         transcript = transcribe.transcribe(
             audio,
@@ -240,6 +268,11 @@ class PipelineRunner:
             self._emit(stage, 0.95, "Identifying speakers")
             transcribe.diarize(audio, transcript, hf_token=get_secret(HF_TOKEN_KEY, self.settings))
 
+        self._save_transcript(transcript)
+        self._finish_stage(stage)
+        return transcript
+
+    def _save_transcript(self, transcript: Transcript) -> None:
         transcript.save(self.workspace.transcript)
         store.upsert_transcript(
             TranscriptRow(
@@ -253,7 +286,49 @@ class PipelineRunner:
             )
         )
 
-        self._finish_stage(stage)
+    # -- speech or visual --------------------------------------------------
+
+    @property
+    def visual_mode(self) -> bool:
+        return self._mode == "visual"
+
+    def _resolve_highlight_mode(self, transcript: Transcript) -> Transcript:
+        """Decide whether this job clips by speech or by picture.
+
+        The decision is written to the workspace so a retry makes the same one.
+        Switching to visual replaces the transcript with an empty one (Whisper's
+        output is kept beside it), so no stage downstream — reframe, captions,
+        the caption editor — ever shows hallucinated words over silent footage.
+        """
+        if self.workspace.highlight_mode.exists():
+            saved = json.loads(self.workspace.highlight_mode.read_text(encoding="utf-8"))
+            self._mode = saved.get("mode", "speech")
+            return Transcript.load(self.workspace.transcript) if self.visual_mode else transcript
+
+        configured = self.settings.clips.highlight_mode
+        minutes = max((self.source.duration_s or 0.0) / 60.0, 1e-6)
+        wpm = len(transcript.words) / minutes
+
+        mode, why = visual.choose_mode(
+            configured,
+            words_per_minute=wpm,
+            min_speech_wpm=self.settings.clips.min_speech_wpm,
+            has_video=self.source.has_video,
+            has_audio=self.source.has_audio,
+        )
+
+        self._mode = mode
+        log.info("Job %s clips by %s (%s).", self.job.id, mode, why)
+        self.workspace.highlight_mode.write_text(
+            json.dumps({"mode": mode, "reason": why, "words_per_minute": round(wpm, 1)}),
+            encoding="utf-8",
+        )
+
+        if mode == "visual" and transcript.words:
+            self.workspace.transcript.replace(self.workspace.speech_transcript)
+            transcript = Transcript(model=f"none (visual mode; {transcript.model})")
+            self._save_transcript(transcript)
+
         return transcript
 
     def _load_or_detect_silences(self, audio: Path) -> list[Silence]:
@@ -279,6 +354,26 @@ class PipelineRunner:
             log.info("Reusing %d existing clips for job %s.", len(existing), self.job.id)
             self._finish_stage(stage)
             return existing
+
+        if self.visual_mode:
+            self._emit(stage, 0.0, "Finding highlights from the picture")
+            clips = visual.detect(
+                Path(self.source.path),
+                duration_s=self.source.duration_s,
+                config=visual.VisualConfig(
+                    min_duration_s=self.settings.clips.visual_min_duration_s,
+                    max_duration_s=self.settings.clips.visual_max_duration_s,
+                    max_clips=self.settings.clips.max_clips,
+                    min_score=self.settings.clips.visual_min_score,
+                ),
+                job_id=self.job.id,
+                samples_path=self.workspace.visual_samples,
+                on_progress=self._stage_progress(stage),
+                cancelled=self._is_cancelled,
+            )
+            store.replace_clips(self.job.id, clips)
+            self._finish_stage(stage)
+            return clips
 
         provider_name = self.job.provider or self.settings.active_provider
         provider = build_provider(provider_name, self.settings)
@@ -323,6 +418,17 @@ class PipelineRunner:
             cached = self.workspace.crop_path(clip.id)
             if cached.exists():
                 crop_paths[clip.id] = CropPath.load(cached)
+            elif self.visual_mode and self.workspace.visual_samples.exists():
+                # Faces mean nothing in wildlife footage; hold on the subject.
+                crop_paths[clip.id] = visual.subject_crop_path(
+                    visual.load_samples(self.workspace.visual_samples),
+                    video=source_path,
+                    start_s=clip.start_s,
+                    end_s=clip.end_s,
+                    aspect_w=config.aspect_w,
+                    aspect_h=config.aspect_h,
+                )
+                crop_paths[clip.id].save(cached)
             else:
                 crop_paths[clip.id] = build_crop_path(
                     source_path,
@@ -380,6 +486,7 @@ class PipelineRunner:
                 words=words,
                 style=style,
                 ratio=ratio,
+                mute_audio=self.visual_mode and self.settings.clips.visual_mute_audio,
             )
 
             def clip_progress(fraction: float, i: int = index) -> None:
